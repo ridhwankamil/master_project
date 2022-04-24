@@ -11,9 +11,6 @@ import csv
 import networkx as nx
 from skimage.util import invert
 
-
-
-
 from nav_msgs.msg import OccupancyGrid,Path
 from geometry_msgs.msg import Point, PoseStamped
 from rospy_message_converter import message_converter
