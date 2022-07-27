@@ -4,28 +4,26 @@ import numpy as np
 import scipy.ndimage.morphology as morph
 from skimage.morphology import skeletonize
 from skimage.util import invert
+import networkx as nx
 from math import ceil
+from copy import deepcopy
 from rospy_message_converter import message_converter
+
+# ros import
+from nav_msgs.msg import OccupancyGrid
 
 from matplotlib import pyplot as plt
 
-class OccMap():
-    def __init__(self) -> None:
-        """generate Occupancy map object from map dict from ros messages
-        occ_map : Converted version of ros OccupancyGrid msgs in dictionary type
-        rr : robot radius in metre
-        """
-        self.occ_map = None 
+class OccupancyMap():
+    def __init__(self,map:OccupancyGrid = None) -> None:
+        """Create OccupancyMap object"""
+        self.map = None 
         self.skel_map = None
         self.skel_dist_map = None
 
-        self.width = None # the width of map
-        self.height = None # the heiight of map
-        self.resolution = None #resolution of map in metre/grid
-        self.origin = None #origin at lower left side
-        self.max = None #maximum coordinate for both axis
+        self.max = {} #maximum coordinate for both axis
 
-        self.np_occ_map = None #mapdata in numpy array
+        self.np_map = None #mapdata in numpy array dtype = bool
         self.np_skel_map = None
         self.np_skel_dist_map = None
 
@@ -36,33 +34,47 @@ class OccMap():
         # self.skel = skeletonize(invert(self.map_array))
         # print(self.skel)
 
-    def init_occ_map(self, occ_map:dict):
-        self.occ_map = occ_map.copy() #make a copy instead
+    def init_map(self, map_msg:OccupancyGrid):
+        """Initialize the original map"""
+        # save the OccupancyGrid map to internal object
+        self.map= map_msg
 
-        #obtain all info about map
-        self.width = occ_map['info']['width']
-        self.height = occ_map['info']['height']
-        self.resolution = occ_map['info']['resolution']
-        self.origin= {'x':occ_map['info']['origin']['position']['x'], 'y':occ_map['info']['origin']['position']['y']}
-        self.max = {'x':self.origin['x'] + (self.width*self.resolution), 'y': self.origin['y'] + (self.height*self.resolution)}
+        # generate max value for easier usage later on
+        self.max['x'] = self.map.info.origin.position.x + (self.map.info.width*self.map.info.resolution)
+        self.max['y'] =  self.map.info.origin.position.x + (self.map.info.height*self.map.info.resolution)
 
         #convert map into binary numpy array and substitute unknown value (-1) as obstacle
-        self.np_occ_map = np.array(occ_map['data'])
-        self.np_occ_map[self.np_occ_map == -1] = 1
-        self.np_occ_map[self.np_occ_map == 100] = 1
+        self.np_map = np.array(self.map.data, dtype=np.uint8)
+        self.np_map[self.np_map == -1] = 1
+        self.np_map[self.np_map == 100] = 1
+
+        #Origialdata is in uint8 type convert to boolean
+        self.np_map = self.np_map.astype(bool)
 
         #shape the map array into 2D
-        self.np_occ_map.shape = (self.height,self.width)
+        self.np_map.shape = (self.map.info.height,self.map.info.width)
 
-        # convert numpy to list back to save inside of dict for later to be converted to ros msg using message onverter
-        self.occ_map['data'] = self.np_occ_map.flatten().tolist()   
 
-        # print(self.map_array)
-        # self.plot = plt.imshow(self.skel, cmap='gray_r', origin='lower', vmin = 0, vmax = 1, extent=[self.origin_x,self.max_x,self.origin_y,self.max_y])
-        # plt.show()
+    def init_skel_map(self) -> None:
+        """ Initialize skeletonized map"""
 
-    # def init_skel():
-    #     pass
+        # check if map data is initialize
+        if self.map is None and self.np_map is None:
+            print("Please initialize map first")
+            return
+        
+        # 1st create a copy of Original OccupancyGrid map object
+        self.skel_map = deepcopy(self.map)
+
+        #2nd create skeletonized numpy array
+        self.np_skel_map = skeletonize(invert(self.np_map))
+
+        #3rd convert 1 to 100
+        temp_map = np.array(self.np_skel_map, dtype=np.uint8)
+        temp_map[temp_map == 1] = 100
+
+        #4th save into skel_map object
+        self.skel_map.data = temp_map.flatten().tolist()
 
     # def get_occ_map(self):
     #     map_dict = 
@@ -131,5 +143,8 @@ class OccMap():
 
     #     return [row,col]
 
-    # def grid_to_world(self,row,col):
-    #     pass
+    def grid_to_world(self,row_col):
+        add = self.map.info.resolution/2   
+        ros_y = row_col[0] * self.map.info.resolution + self.map.info.origin.position.y
+        ros_x = row_col[1] * self.map.info.resolution + self.map.info.origin.position.x
+        return np.array([ros_x+add,ros_y+add])
