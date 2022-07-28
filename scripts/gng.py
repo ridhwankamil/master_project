@@ -39,7 +39,7 @@ class PRM():
         self.done = False
 
 
-         # subscribe to map topic
+        # subscribe to map topic
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
 
         self.map_pub = rospy.Publisher('/inflated_map',OccupancyGrid, latch=True, queue_size=10)
@@ -52,29 +52,16 @@ class PRM():
     def map_callback(self,map_msg):
         # Initialize map every time new map receive
         self.occ_map.init_map(map_msg)
-        self.occ_map.init_skel_map()
+        self.done = True
 
-        # Find each pixel of skeletonized
-        skel_grid = np.where(self.occ_map.np_skel_map == True)
+    def generate_node_marker(self) -> Marker:
+        """Return edge marker"""
+        #check if graph is initialized
+        if self.graph is None:
+            print("Graph object uninitilaized")
+            return
 
-        # stack two array into 1 array of[x,y]
-        skel_grid = np.stack(skel_grid,axis=1)
-
-        # apply conversion
-        skel_pixel = np.apply_along_axis(node.occ_map.grid_to_world,1,skel_grid)
-
-        # generate edges from nearest neighbour
-        # 1. create kd tree from nodes array
-        self.nodes_kd_tree = KDTree(skel_pixel,copy_data=True)
-
-        # 2.find max radius for knn
-        resolution= self.occ_map.map.info.resolution
-        radius = math.hypot(resolution, resolution)
-
-        # 3.query knn using ball point
-        edges_array= self.nodes_kd_tree.query_ball_point(skel_pixel,radius)
-
-        # 4. initialize point marker
+        # 1. initialize node marker
         node_marker = Marker()
         node_marker.type = 8
         node_marker.ns = 'nodes'
@@ -88,19 +75,21 @@ class PRM():
         node_marker.color.a = 1.0
         node_marker.color.r = 1.0
 
-        self.node_marker_pub.publish(node_marker)
-
-        
-        # 5. adding node 1 by 1
-        self.graph = nx.Graph() # create emtpy undirected graph
-        for index,item in enumerate(skel_pixel):
-            self.graph.add_node(index,x=item[0],y=item[1])
+        # 2. iterate node 1 by 1 & append to node marker
+        for item in self.graph.nodes(data='pos'):
             point = Point()
-            point.x = item[0]
-            point.y = item[1]
-            point.z = 0.1
+            point.x = item[1][0]
+            point.y = item[1][1]
             node_marker.points.append(point)
+        
+        return node_marker
 
+    def generate_edge_marker(self) -> Marker:
+        """Return edge marker"""
+        #check if graph is initialized
+        if self.graph is None:
+            print("Graph object uninitilaized")
+            return
 
         edge_marker = Marker()
         edge_marker.type = 5
@@ -112,36 +101,26 @@ class PRM():
         edge_marker.scale.x = 0.02
         edge_marker.scale.y = 0.02
         edge_marker.scale.z = 0.02
-
         edge_marker.color.a = 1.0
         edge_marker.color.b = 1.0
         edge_marker.pose.orientation.w = 1.0
 
-        # 6. adding edge 1 by 1
-        for index,outer_item in enumerate(edges_array):
+        # 2. iterate edge 1 by 1 & append to edge marker
+        for item in self.graph.edges:
+            pos = self.graph.nodes[item[0]]['pos']
+            start = Point()
+            start.x = pos[0]
+            start.y = pos[1]
 
-            start_point = Point()
-            start_point.x = skel_pixel[index][0]
-            start_point.y = skel_pixel[index][1]
-            start_point.z = 0.1
+            pos = self.graph.nodes[item[1]]['pos']
+            end = Point()
+            end.x = pos[0]
+            end.y = pos[1]
 
-            for inner_item in outer_item:
-                self.graph.add_edge(index,inner_item)
-
-                end_point = Point()
-                end_point.x = skel_pixel[inner_item][0]
-                end_point.y = skel_pixel[inner_item][1]
-                end_point.z = 0.1
-
-                edge_marker.points.append(start_point)
-                edge_marker.points.append(end_point)
-        self.edge_marker_pub.publish(edge_marker)
-
-        self.map_pub.publish(self.occ_map.skel_map)
-
-        self.done =True
-
-        # self.query_shortest_path([],[])
+            edge_marker.points.append(start)
+            edge_marker.points.append(end)
+        
+        return edge_marker
 
     def query_shortest_path(self,start,goal):
         #dummy start & goal
@@ -203,14 +182,12 @@ class PRM():
         # 2. apply conversion from [row,col] -> [x,y]
         data_xy = np.apply_along_axis(self.occ_map.grid_to_world,1,data)
 
-        gng = self.create_gng(max_nodes=100)
+        gng = self.create_gng(max_nodes=200)
 
-            # for epoch in range(20):
+        # for epoch in range(5):
         gng.train(data_xy, epochs=1)
 
         return gng
-
-
 
     def image_to_data(self,map):
         data = []
@@ -261,6 +238,8 @@ class PRM():
         for node_1, node_2 in g.graph.edges:
                 nxgraph.add_edge(nodeid[node_1], nodeid[node_2])
         return nxgraph
+
+
 if __name__ == '__main__':
     rospy.init_node('prm')
     node = PRM()
@@ -268,16 +247,21 @@ if __name__ == '__main__':
 
     while not rospy.is_shutdown():
         if node.done:
-
             print('GNG Start Learning')
             gng = node.train_gng()
 
-            gg = node.convert_gng_to_nx(gng)
+            node.graph = node.convert_gng_to_nx(gng)
 
-            pprint(list(gg.edges))
+            node_marker = node.generate_node_marker()
+            edge_marker = node.generate_edge_marker()
+            node.node_marker_pub.publish(node_marker)
+            node.edge_marker_pub.publish(edge_marker)
+
+            node.graph.add_node('start', pos=(0.0, 0.0))
+            result = nx.k_nearest_neighbors(node.graph,nodes='start')
+            print(result)
 
             node.draw_image(gng.graph,show=True)
-
 
             node.done = False
 
