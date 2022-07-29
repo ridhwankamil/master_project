@@ -29,30 +29,46 @@ import time
 class PRM():
     def __init__(self):
         self.nodes_kd_tree:KDTree
-       
-        # self.map_pub2 = rospy.Publisher('/map2',OccupancyGrid, latch=True, queue_size=10)
-        # create instacne of occ-map object
+        self.nodes_arr:np.array
         self.occ_map = OccupancyMap()
-
         self.graph:nx.Graph = None
-
+        self.gng:algorithms.GrowingNeuralGas = None
         self.done = False
-
 
         # subscribe to map topic
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
 
-        self.map_pub = rospy.Publisher('/inflated_map',OccupancyGrid, latch=True, queue_size=10)
+        # publisher
+        self.inflated_map_pub = rospy.Publisher('/inflated_map',OccupancyGrid, latch=True, queue_size=1)
+        self.skel_map_pub = rospy.Publisher('/skel_map',OccupancyGrid, latch=True, queue_size=1)
         self.node_marker_pub = rospy.Publisher('/node_marker',Marker,queue_size=10,latch=True)
         self.edge_marker_pub = rospy.Publisher('/edge_marker', Marker, queue_size=10,latch=True)
         self.path_pub = rospy.Publisher('/shortest_path',Path,queue_size=1,latch=True)
-        self.gng_pub = rospy.Publisher('/gng',Marker,queue_size=10,latch=True)
-        print('done')
 
     def map_callback(self,map_msg):
         # Initialize map every time new map receive
         self.occ_map.init_map(map_msg)
+        self.inflated_map_pub.publish(self.occ_map.map)
+        self.skel_map_pub.publish(self.occ_map.skel_map)
+        self.gng = self.train_gng()
+        self.graph = self.convert_gng_to_nx(self.gng)
+
+        self.nodes_arr = self.extract_node_from_nx(self.graph)
+
+        self.nodes_kd_tree = KDTree(self.nodes_arr)
+        
+
+        node_marker = self.generate_node_marker()
+        edge_marker = self.generate_edge_marker()
+        node.node_marker_pub.publish(node_marker)
+        node.edge_marker_pub.publish(edge_marker)
+
         self.done = True
+        self.query_shortest_path([],[])
+
+    def extract_node_from_nx(self,nxgraph:nx.Graph):
+        node_arr = np.array(nxgraph.nodes(data=True))
+        return np.array([(e[1]['pos']) for e in node_arr])
 
     def generate_node_marker(self) -> Marker:
         """Return edge marker"""
@@ -125,31 +141,29 @@ class PRM():
     def query_shortest_path(self,start,goal):
         #dummy start & goal
         start = np.array([0.0,0.0])
-        goal = np.array([-4.9,-4.0])
+        goal = np.array([1.5,1.0])
         # 1. temperory adding start and goal node, willbe deleted later
-        self.graph.add_node("start",x=start[0],y=start[1])
-        self.graph.add_node("goal",x=goal[0],y=goal[1])
+        self.graph.add_node("start",pos=(start[0],start[1]))
+        self.graph.add_node("goal",pos=(goal[0],goal[1]))
 
         width = self.occ_map.map.info.width
         height = self.occ_map.map.info.height
         if width > height:radius = width
         else:radius = height
 
-        dists, indexes = self.nodes_kd_tree.query(start,k=1000,distance_upper_bound=radius)
+        dists, indexes = self.nodes_kd_tree.query(start,k=10,distance_upper_bound=radius)
         for item in indexes:
             # check collision
 
             #add to graph
             self.graph.add_edge("start",item)
-            break
 
-        dists, indexes = self.nodes_kd_tree.query(goal,k=1000,distance_upper_bound=radius)
+        dists, indexes = self.nodes_kd_tree.query(goal,k=10,distance_upper_bound=radius)
         for item in indexes:
             # check collision
 
             #add to graph
             self.graph.add_edge("goal",item)
-            break
 
         waypoint = nx.dijkstra_path(self.graph,"start","goal")
 
@@ -157,7 +171,7 @@ class PRM():
         path.header.frame_id = 'map'
         path.header.stamp = rospy.Time.now()
 
-        arr = np.array(waypoint)
+        # arr = np.array(waypoint)
         # print(arr)
 
         # print(self.graph.nodes['goal'])
@@ -165,8 +179,8 @@ class PRM():
             pose_stamped = PoseStamped()
             data = self.graph.nodes[item]
             # print(data)
-            pose_stamped.pose.position.x = data['x']
-            pose_stamped.pose.position.y = data['y']
+            pose_stamped.pose.position.x = data['pos'][0]
+            pose_stamped.pose.position.y = data['pos'][1]
             pose_stamped.pose.orientation.w = 1.0
 
             path.poses.append(pose_stamped)
@@ -228,7 +242,7 @@ class PRM():
             min_distance_for_update=0.01,
         )
 
-    def convert_gng_to_nx(self,g):
+    def convert_gng_to_nx(self,g:algorithms.GrowingNeuralGas):
         nxgraph = nx.Graph()
         nodeid = {}
         for indx, node in enumerate(g.graph.nodes):
@@ -236,33 +250,59 @@ class PRM():
             nxgraph.add_node(nodeid[node], pos=(node.weight[0][0], node.weight[0][1]))
         # positions = nx.get_node_attributes(nxgraph, "pos")
         for node_1, node_2 in g.graph.edges:
+            # print(nodeid[node_1])
+            p1 = nxgraph.nodes[nodeid[node_1]]['pos']
+            p2 = nxgraph.nodes[nodeid[node_2]]['pos']
+            if self.occ_map.check_collision(p1,p2):
                 nxgraph.add_edge(nodeid[node_1], nodeid[node_2])
         return nxgraph
 
+    def testing_function(self):
+        # 1. initialize node marker
+        node_marker = Marker()
+        node_marker.type = 8
+        node_marker.ns = 'test'
+        node_marker.id = 5
+        node_marker.header.frame_id = 'map'
+        node_marker.header.stamp = rospy.Time.now()
+        node_marker.lifetime = rospy.Duration(0)
+        node_marker.scale.x = 0.05
+        node_marker.scale.y = 0.05
+        node_marker.scale.z = 0.01
+        node_marker.color.a = 1.0
+        node_marker.color.r = 1.0
 
+        #find pixel pos from xy coordinate
+        point = Point()
+        point.x = 1.567
+        point.y = 0.02
+        node_marker.points.append(point)
+
+        status,p = self.occ_map.check_occupancy([1.567,0.02])
+
+        for item in p:
+            xy = self.occ_map.grid_to_world(item)
+            poi = Point()
+            poi.x = xy[0]
+            poi.y = xy[1]
+            node_marker.points.append(poi)
+
+        print(status)
+
+
+        self.node_marker_pub.publish(node_marker)
+        
 if __name__ == '__main__':
-    rospy.init_node('prm')
+    rospy.init_node('gng_roadmap_planner')
     node = PRM()
     rate = rospy.Rate(1)
 
     while not rospy.is_shutdown():
         if node.done:
-            print('GNG Start Learning')
-            gng = node.train_gng()
-
-            node.graph = node.convert_gng_to_nx(gng)
-
-            node_marker = node.generate_node_marker()
-            edge_marker = node.generate_edge_marker()
-            node.node_marker_pub.publish(node_marker)
-            node.edge_marker_pub.publish(edge_marker)
-
-            node.graph.add_node('start', pos=(0.0, 0.0))
-            result = nx.k_nearest_neighbors(node.graph,nodes='start')
-            print(result)
-
-            node.draw_image(gng.graph,show=True)
-
+            # node.testing_function()
+            print('GNG Finished learning')
+            # print("gng graph: ",node.gng)
+            node.draw_image(node.gng.graph,show=True)
             node.done = False
 
 
