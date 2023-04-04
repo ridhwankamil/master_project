@@ -4,37 +4,66 @@ import rospy
 import math
 import numpy as np
 import traceback
+import copy
+from skimage.util import invert
+from skimage.transform import rescale
 from master_project.srv import RequestPath,RequestPathRequest,RequestPathResponse
 # from tf2_ros import Buffer,TransformListener
 import tf2_ros
 # import tf2_geometry_msgs.tf2_geometry_msgs
 from tf2_geometry_msgs.tf2_geometry_msgs import do_transform_pose
 from nav_msgs.msg import Path
+from visualization_msgs.msg import Marker, MarkerArray
 
 from move_base_msgs.msg import MoveBaseAction,MoveBaseFeedback,MoveBaseGoal,MoveBaseResult,MoveBaseActionGoal
 from mbf_msgs.msg import ExePathAction,ExePathGoal,ExePathFeedback,ExePathResult
 
-from geometry_msgs.msg import Pose,PoseStamped,TransformStamped
+from geometry_msgs.msg import Pose,Point,PoseStamped,TransformStamped
 
 from actionlib import SimpleActionServer,SimpleActionClient
+
+from sensor_msgs.msg import LaserScan
+from nav_msgs.msg import OccupancyGrid
+
+from occ_map import OccupancyMap
+
+from scipy.spatial import KDTree
 
 class NavigationServer:
     def __init__(self,name):
         self.path_planner_ser_name = '/gng/path_planner'
         # self.path_planner_ser_name = '/gng_biased/path_planner'
 
+        # 1. subscribe to lidar
+        self.lidar_sub = rospy.Subscriber('/scan_multi',LaserScan,self.scan_cb)
+        # store incoming laser scan msg internally
+        self.laser_scan:LaserScan = None
+
+        # temp
+        self.map_pub = rospy.Publisher('pub_map',OccupancyGrid,queue_size=10,latch=True)
+        self.obs_marker_pub = rospy.Publisher('obs_marker',Marker,queue_size=100,latch=True)
+
+        self.obstacle_kd_tree:KDTree # kd-tree for nodes array
+
+        # 2. subscribe to map 
+        self.map_sub = rospy.Subscriber('/map',OccupancyGrid,self.map_cb)
+        self.map = OccupancyMap() #original map
+        self.map_done = False # this is true after have receive map
+
+        # 3. Local Planner client
         self.controller_client = SimpleActionClient('/move_base_flex/exe_path',ExePathAction)
 
+        # 4. setup tf2 buffer
         # init tf buffer & listener
         self.tfBuffer:tf2_ros.Buffer = tf2_ros.Buffer()
         self.tfListener:tf2_ros.TransformListener = tf2_ros.TransformListener(self.tfBuffer)
 
         # action server
-        self.action_name = name
-        self.action_feedback = MoveBaseFeedback()
-        self.action_result = MoveBaseResult()
-        self.action_server = SimpleActionServer(self.action_name,MoveBaseAction,self.navigate_callback,auto_start=False)
-        self.action_server.start()
+        # self.action_name = name
+        # self.action_feedback = MoveBaseFeedback()
+        # self.action_result = MoveBaseResult()
+        # self.action_server = SimpleActionServer(self.action_name,MoveBaseAction,self.navigate_callback,auto_start=False)
+        # self.action_server.start()
 
 
         self.action_client = SimpleActionClient("/navigation_server",MoveBaseAction)
@@ -43,24 +72,6 @@ class NavigationServer:
         
         rospy.loginfo("Navigation server is active")
 
-        
-
-        
-
-        
-        
-
-
-        # self.pub = rospy.Publisher("/number_count", Int64, queue_size=10)
-        self.simple_goal_subscriber = rospy.Subscriber("/move_base_simple/goal", PoseStamped, self.simple_goal_callback)
-        # self.reset_service = rospy.Service("/reset_counter", SetBool, self.callback_reset_counter)
-
-
-    def simple_goal_callback(self,msg:PoseStamped):
-        goal = MoveBaseGoal()
-        goal.target_pose = msg
-        self.action_client_goal = goal
-        self.new_goal = True
 
     def send_goal(self):
         self.new_goal = False
@@ -95,18 +106,17 @@ class NavigationServer:
             # req.goal.pose.orientation.w = 0.687530411067247
             req.goal = goal.target_pose
             req.custom_weight_function = False
-            print("call service")
-            # print(req)
+            print("requesting path planner service for shortest path")
+            # requesting path planner service for shortest path
             res:RequestPathResponse = path_requester.call(req)
             print(res.message)
             if not res.state:
                 rospy.logerr(res.message)
-                self.action_server.set_aborted()
+                # self.action_server.set_aborted()
                 return
             
-            print(len(res.path.poses))
-
-            print("interpolating pose")
+            # 2. after receiving shortest path, interpolated the path to get smooth path
+            print("interpolating waypoint into path")
             interpolated_path = Path()
 
             for index in range(len(res.path.poses)-2):
@@ -116,10 +126,7 @@ class NavigationServer:
             
             interpolated_path.poses.append(res.path.poses[-1])
     
-            print(len(interpolated_path.poses))
-            
-            # print(res)
-            # print(type(res))
+            # 3. execute local planner to follow trajectory
             if self.controller_client.wait_for_server(rospy.Duration(3.0)):
                 rospy.loginfo("exe_path action server available")
                 done = False
@@ -137,37 +144,25 @@ class NavigationServer:
                 self.controller_client.send_goal(controller_goal,done_cb=done_cb)
 
                 while not done:
-                    if self.action_server.is_preempt_requested():
-                        self.controller_client.cancel_goal()
-                        self.action_server.set_preempted()
-                        return
+                    # this is loop when local planner is running
 
                     rate.sleep()
 
                 print("out of while loop")
             else:
                 rospy.logerr("exe_path action server is not running")
-                self.action_server.set_aborted()
                 return
             
         except rospy.ROSException:
             rospy.logerr("service not available")
-            self.action_server.set_aborted()
             return
         except rospy.ServiceException:
             rospy.logerr("problem comunicate with service")
-            self.action_server.set_aborted()
-            return
-        except rospy.ROSSerializationException:
-            rospy.logerr("error")
-            self.action_server.set_aborted()
             return
         except Exception as err:
             rospy.logerr("other error occur when calling path planner service")
             print(traceback.format_exc())
-            self.action_server.set_aborted()
             return
-        self.action_server.set_succeeded()
         
     def interpolate_straight(self,source:PoseStamped,target:PoseStamped):
         injection_pose_list = []
@@ -215,7 +210,85 @@ class NavigationServer:
         # sum= math.sqrt(abs((B[0]-A[0]) + (B[1]-A[1])))
         return sum    
 
+    def scan_cb(self,msg:LaserScan):
+        self.laser_scan = msg
 
+    def map_cb(self,msg:OccupancyGrid):
+        print("map_callback")
+        binary_map = self.convert_to_binary_map(msg)
+        self.map.init_map(binary_map)
+        obstacle_data = self.map_to_data(invert(self.map.np_map))
+        obstacle_data_xy = np.apply_along_axis(self.map.grid_to_world,1,obstacle_data)
+
+        # print("length of obstacle data: ", len(obstacle_data_xy))
+        self.publish_obs_marker(obstacle_data_xy)
+
+        # generate obstacle kd tree
+        self.obstacle_kd_tree = KDTree(obstacle_data_xy,copy_data=True)
+
+        # dists, indexes = self.obstacle_kd_tree.query([0.0,0.0],10)
+        self.map_pub.publish(self.map.map)
+        print("done map callback")
+
+    def publish_obs_marker(self,obstacle_data_xy):
+        # 1. initialize node marker
+        node_marker = Marker()
+        node_marker.type = 8
+        node_marker.ns = 'obstacle'
+        node_marker.id = 15
+        node_marker.header.frame_id = 'map'
+        node_marker.header.stamp = rospy.Time.now()
+        node_marker.lifetime = rospy.Duration(0)
+        node_marker.scale.x = 0.1
+        node_marker.scale.y = 0.1
+        node_marker.scale.z = 0.1
+        node_marker.color.a = 1.0
+        node_marker.color.r = 1.0
+
+        # 2. iterate obstacle 1 by 1 & append to obstacle marker
+        print("iterating")
+        for item in obstacle_data_xy:
+            # print(item)
+            point = Point()
+            point.x = item[0]
+            point.y = item[1]
+            node_marker.points.append(point)
+
+        print("publishing obstacle marker")
+        self.obs_marker_pub.publish(node_marker)
+
+
+    def convert_to_binary_map(self,map:OccupancyGrid,scale_factor=0.1):
+        # 1.0 copy originalmap object
+        binary_map = copy.deepcopy(map)
+        # print(type(binary_map))
+        
+        # 2.0 create numpy array of map data
+        np_map = np.array(binary_map.data)
+        # 2.1 convert into binary image 
+        np_map[np_map == -1] = 1
+        np_map[np_map == 100] = 1
+        # 2.2 convert numpy array to boolean type
+        np_map = np_map.astype(bool)
+        # 2.3 change the shape of numpy array into 2d
+        np_map.shape = (binary_map.info.height,binary_map.info.width)
+ 
+        
+        
+        # 4.1 generate map data array from numpy map array
+        temp_np_map = np_map.astype(np.uint8)
+        temp_np_map[temp_np_map == 1] = 100
+
+        binary_map.data = temp_np_map.flatten().tolist()
+
+        return binary_map
+
+    def map_to_data(self,map):
+        data = []
+        for (x, y), value in np.ndenumerate(map):
+            if value == 0:
+                data.append([x, y])
+        return np.array(data)
 
 if __name__ == '__main__':
     rospy.init_node('experiment3')
