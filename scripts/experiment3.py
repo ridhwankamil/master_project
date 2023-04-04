@@ -31,8 +31,8 @@ from scipy.spatial import KDTree
 
 class NavigationServer:
     def __init__(self,name):
-        self.path_planner_ser_name = '/gng/path_planner'
-        # self.path_planner_ser_name = '/gng_biased/path_planner'
+        # self.path_planner_ser_name = '/gng/path_planner'
+        self.path_planner_ser_name = '/gng_biased/path_planner'
 
         # 1. subscribe to lidar
         self.lidar_sub = rospy.Subscriber('/scan_multi',LaserScan,self.scan_cb)
@@ -86,30 +86,40 @@ class NavigationServer:
             print("action not available")
         return
 
-    def navigate_callback(self,goal:MoveBaseGoal):
+    def navigate_callback(self,goal:MoveBaseGoal=MoveBaseGoal()):
         # 1 create Path planner service client
         # check if planner service is available
         start_pose:PoseStamped = PoseStamped()
         try:
             rospy.wait_for_service(self.path_planner_ser_name,3)
             rospy.loginfo("service available")
-            transform:TransformStamped = self.tfBuffer.lookup_transform('map','base_footprint',rospy.Time.now(),rospy.Duration(2.0))
-            start_pose.header = transform.header
-            start_pose.pose.orientation.w = 1.0
-            start_pose = do_transform_pose(start_pose,transform)
-            path_requester = rospy.ServiceProxy(self.path_planner_ser_name,RequestPath)
             req = RequestPathRequest()
-            req.start = start_pose
-            # req.goal.pose.position.x = 0.7078118324279785
-            # req.goal.pose.position.y = -5.542358875274658
-            # req.goal.pose.orientation.z = 0.7261555851590639
-            # req.goal.pose.orientation.w = 0.687530411067247
-            req.goal = goal.target_pose
+            # uncomment if use real robot
+            # transform:TransformStamped = self.tfBuffer.lookup_transform('map','base_footprint',rospy.Time.now(),rospy.Duration(2.0))
+            # start_pose.header = transform.header
+            # start_pose.pose.orientation.w = 1.0
+            # start_pose = do_transform_pose(start_pose,transform)
+            
+            # req.start = start_pose
+            path_requester = rospy.ServiceProxy(self.path_planner_ser_name,RequestPath)
+            # req.start.header.frame_id = 'map'
+            # req.start.header.stamp = rospy.Time.now()
+            req.start.pose.position.x = 0.0
+            req.start.pose.position.y = 0.0
+            req.start.pose.position.y = 0.0
+            req.start.pose.orientation.z = 0.0
+            req.start.pose.orientation.w = 1.0
+
+            req.goal.pose.position.x = -15.106101989746094
+            req.goal.pose.position.y = 5.07640266418457
+            req.goal.pose.orientation.z = 0.9999733361485715
+            req.goal.pose.orientation.w = 0.007302533251955163
+            # req.goal = goal.target_pose
             req.custom_weight_function = False
             print("requesting path planner service for shortest path")
             # requesting path planner service for shortest path
             res:RequestPathResponse = path_requester.call(req)
-            print(res.message)
+            print(res)
             if not res.state:
                 rospy.logerr(res.message)
                 # self.action_server.set_aborted()
@@ -229,6 +239,7 @@ class NavigationServer:
         # dists, indexes = self.obstacle_kd_tree.query([0.0,0.0],10)
         self.map_pub.publish(self.map.map)
         print("done map callback")
+        self.map_done = True
 
     def publish_obs_marker(self,obstacle_data_xy):
         # 1. initialize node marker
@@ -295,9 +306,10 @@ if __name__ == '__main__':
     server = NavigationServer(rospy.get_name())
     rate = rospy.Rate(10)
 
-    # while not rospy.is_shutdown():
-    #     if server.new_goal:
-    #         server.send_goal()
-    #         print("spin")
-    #     rate.sleep()
+    while not rospy.is_shutdown():
+        if server.map_done:
+            
+            server.navigate_callback()
+            exit()
+        rate.sleep()
     rospy.spin()
