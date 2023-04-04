@@ -1,0 +1,7 @@
+<launch>
+  <node name="prm_halton_planner" pkg="master_project" type="prm_halton_planner.py" output="screen" ns="prm_halton" > 
+    <param name="max_nodes" value="2000"/>
+    <param name="robot_radius" value="0.5"/>
+    <param name="max_connection_distance" value="1.0"/> 
+  </node>
+</launch>

@@ -1,0 +1,7 @@
+bool custom_weight_function
+geometry_msgs/PoseStamped start
+geometry_msgs/PoseStamped goal
+---
+nav_msgs/Path path
+bool state
+string message

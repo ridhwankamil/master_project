@@ -2,9 +2,11 @@
 
 import enum
 from operator import index
+import copy
 import rospy
 import numpy as np
 from occ_map import OccupancyMap
+from skimage.transform import rescale
 
 import networkx as nx
 import math
@@ -31,15 +33,20 @@ class PRM():
         self.nodes_kd_tree:KDTree
         self.nodes_arr:np.array
         self.occ_map = OccupancyMap()
+        self.scaled_map = OccupancyMap()
+
         self.graph:nx.Graph = None
         self.gng:algorithms.GrowingNeuralGas = None
         self.done = False
+        self.scaled_map:OccupancyGrid = None
+        self.np_scaled_map:np.ndarray = None
 
         # subscribe to map topic
         self.map_sub = rospy.Subscriber('/map', OccupancyGrid, self.map_callback)
 
         # publisher
         self.inflated_map_pub = rospy.Publisher('/inflated_map',OccupancyGrid, latch=True, queue_size=1)
+        self.scale_map_pub = rospy.Publisher('/scaled_map',OccupancyGrid, latch=True,queue_size=2)
         self.skel_map_pub = rospy.Publisher('/skel_map',OccupancyGrid, latch=True, queue_size=1)
         self.node_marker_pub = rospy.Publisher('/node_marker',Marker,queue_size=10,latch=True)
         self.edge_marker_pub = rospy.Publisher('/edge_marker', Marker, queue_size=10,latch=True)
@@ -48,8 +55,12 @@ class PRM():
     def map_callback(self,map_msg):
         # Initialize map every time new map receive
         self.occ_map.init_map(map_msg)
+        self.generate_scaled_map()
+
+        # publish map topic
         self.inflated_map_pub.publish(self.occ_map.map)
-        self.skel_map_pub.publish(self.occ_map.skel_map)
+        self.scale_map_pub.publish(self.scaled_map)
+
         self.gng = self.train_gng()
         self.graph = self.convert_gng_to_nx(self.gng)
 
@@ -65,6 +76,27 @@ class PRM():
 
         self.done = True
         self.query_shortest_path([],[])
+
+    def generate_scaled_map(self):
+        # 1. copy originalmap object
+        self.scaled_map = copy.deepcopy(self.occ_map.map)
+        
+        # 2. downscaled the map size
+        downscaled_map:np.ndarray = rescale(self.occ_map.np_map,0.25,anti_aliasing=False)
+        downscaled_size = downscaled_map.shape
+        print("scaled: ", downscaled_size)
+
+        self.np_scaled_map = downscaled_map
+
+        self.scaled_map.info.resolution = self.scaled_map.info.resolution * (1/0.25)
+        self.scaled_map.info.width = downscaled_map.shape[1]
+        self.scaled_map.info.height = downscaled_map.shape[0]
+
+        downscaled_map = downscaled_map.astype(np.uint8)
+        downscaled_map[downscaled_map == 1] = 100
+
+        self.scaled_map.data = downscaled_map.flatten().tolist()
+
 
     def extract_node_from_nx(self,nxgraph:nx.Graph):
         node_arr = np.array(nxgraph.nodes(data=True))
@@ -189,7 +221,7 @@ class PRM():
 
         self.done = True
 
-    def train_gng(self,):
+    def train_gng(self):
         # 1. filter only free space in the map and get the each pixel position value into [row,col]
         data = self.image_to_data(self.occ_map.np_map.astype(np.uint8))
 

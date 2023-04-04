@@ -6,7 +6,6 @@ from skimage.morphology import skeletonize
 from skimage.util import invert
 import networkx as nx
 from math import ceil,floor,dist
-from copy import deepcopy
 from rospy_message_converter import message_converter
 
 # ros import
@@ -17,15 +16,11 @@ from matplotlib import pyplot as plt
 class OccupancyMap():
     def __init__(self,map:OccupancyGrid = None) -> None:
         """Create OccupancyMap object"""
-        self.map = None 
-        self.skel_map = None
-        self.skel_dist_map = None
+        self.map:OccupancyGrid = None 
 
         self.max = {} #maximum coordinate for both axis
 
-        self.np_map = None #mapdata in numpy array dtype = bool
-        self.np_skel_map = None
-        self.np_skel_dist_map = None
+        self.np_map = None #mapdata in numpy array, dtype = bool
 
     def init_map(self, map_msg:OccupancyGrid):
         """Initialize the original map"""
@@ -34,7 +29,7 @@ class OccupancyMap():
 
         # 1.1 generate max value for easier usage later on
         self.max['x'] = self.map.info.origin.position.x + (self.map.info.width*self.map.info.resolution)
-        self.max['y'] =  self.map.info.origin.position.x + (self.map.info.height*self.map.info.resolution)
+        self.max['y'] =  self.map.info.origin.position.y + (self.map.info.height*self.map.info.resolution)
 
         # 1.2 convert map into binary numpy array and substitute unknown value (-1) as obstacle
         self.np_map = np.array(self.map.data, dtype=np.uint8)
@@ -47,32 +42,26 @@ class OccupancyMap():
         #shape the map array into 2D
         self.np_map.shape = (self.map.info.height,self.map.info.width)
 
-        # 2.0 inflate the map
-        self.inflate(0.3)
+    # def init_skel_map(self) -> None:
+    #     """ Initialize skeletonized map"""
 
-        # 3.0 init skeletonized map
-        self.init_skel_map()
+    #     # check if map data is initialize
+    #     if self.map is None or self.np_map is None:
+    #         print("Please initialize map first")
+    #         return
 
-    def init_skel_map(self) -> None:
-        """ Initialize skeletonized map"""
+    #     # 1st create a copy of Original OccupancyGrid map object
+    #     self.skel_map = deepcopy(self.map)
 
-        # check if map data is initialize
-        if self.map is None or self.np_map is None:
-            print("Please initialize map first")
-            return
+    #     #2nd create skeletonized numpy array
+    #     self.np_skel_map = skeletonize(invert(self.np_map))
 
-        # 1st create a copy of Original OccupancyGrid map object
-        self.skel_map = deepcopy(self.map)
+    #     #3rd convert 1 to 100
+    #     temp_map = np.array(self.np_skel_map, dtype=np.uint8)
+    #     temp_map[temp_map == 1] = 100
 
-        #2nd create skeletonized numpy array
-        self.np_skel_map = skeletonize(invert(self.np_map))
-
-        #3rd convert 1 to 100
-        temp_map = np.array(self.np_skel_map, dtype=np.uint8)
-        temp_map[temp_map == 1] = 100
-
-        #4th save into skel_map object
-        self.skel_map.data = temp_map.flatten().tolist()
+    #     #4th save into skel_map object
+    #     self.skel_map.data = temp_map.flatten().tolist()
 
     def inflate(self,rr:float):
         """inflate the occupancy map according to robot radius
@@ -90,6 +79,20 @@ class OccupancyMap():
         temp_map[temp_map == 1] = 100
 
         self.map.data = temp_map.flatten().tolist()
+
+    def check_pixel_value(self,xy):
+        """ Check if the space is occupied with obstacle
+        Return True if free
+        return False if occupied"""
+        # 1.0 convert xy to rowcol
+        row_col = self.world_to_grid(xy)
+        # print("row_col: ",row_col)
+
+        row = round(row_col[0])
+        col = round(row_col[1])
+        # print(self.np_map)
+
+        return self.np_map[row,col]
 
     def check_occupancy(self,xy):
         """ Check if the space is occupied with obstacle
