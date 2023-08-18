@@ -331,7 +331,7 @@ class GNGPLANNER():
         if width > height:radius = width
         else:radius = height
 
-        dists, indexes = self.nodes_kd_tree.query(start,k=10,distance_upper_bound=radius)
+        dists, indexes = self.nodes_kd_tree.query(start,k=3,distance_upper_bound=radius)
         for item in indexes:
             # check collision
             # print(item)

@@ -1,23 +1,23 @@
 <launch>
   <node name="gng_experiment1" pkg="master_project" type="get_nodes_inside_radius.py" output="screen" ns="gng" > 
-    <param name="robot_radius" value="0.22" /> 
-    <param name="file_location" value="/home/ridhwan/experiment1_gng.csv" /> 
+    <param name="robot_radius" value="0.25" /> 
+    <param name="file_location" value="/home/ridhwan/experiment1/experiment1_gng.csv" /> 
   </node>
 
 
   <node name="gng_biased_experiment1" pkg="master_project" type="get_nodes_inside_radius.py" output="screen" ns="gng_biased" > 
-    <param name="robot_radius" value="0.22" /> 
-    <param name="file_location" value="/home/ridhwan/experiment1_gng_biased.csv" /> 
+    <param name="robot_radius" value="0.25" /> 
+    <param name="file_location" value="/home/ridhwan/experiment1/experiment1_gng_biased.csv" /> 
   </node>
 
   <node name="prm_experiment1" pkg="master_project" type="get_nodes_inside_radius.py" output="screen" ns="prm" > 
-    <param name="robot_radius" value="0.22" /> 
-    <param name="file_location" value="/home/ridhwan/experiment1_prm.csv" /> 
+    <param name="robot_radius" value="0.25" /> 
+    <param name="file_location" value="/home/ridhwan/experiment1/experiment1_prm.csv" /> 
   </node>
 
 
   <node name="prm_halton_experiment1" pkg="master_project" type="get_nodes_inside_radius.py" output="screen" ns="prm_halton" > 
-    <param name="robot_radius" value="0.22" /> 
-    <param name="file_location" value="/home/ridhwan/experiment1_prm_halton.csv" /> 
+    <param name="robot_radius" value="0.25" /> 
+    <param name="file_location" value="/home/ridhwan/experiment1/experiment1_prm_halton.csv" /> 
   </node>
 </launch>

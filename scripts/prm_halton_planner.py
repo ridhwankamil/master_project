@@ -129,6 +129,12 @@ class PRMHALTONPLANNER():
     self.path_pub.publish(path) # for rviz
 
     res.path = path
+    res.state = True
+    if len(path.poses)==1:
+      print('no path found')
+      res.message = 'no path found'
+      res.state = False
+
 
     return res
 
@@ -181,21 +187,20 @@ class PRMHALTONPLANNER():
         eucl_dist = math.dist(p1,p2)
         return eucl_dist
 
-    if custom_weight_function:
-        waypoint = nx.dijkstra_path(self.graph,"start","goal",custom_weight_func)
-    else:
-        waypoint = nx.dijkstra_path(self.graph,"start","goal",weight_func)
-
     path= Path()
     path.header.frame_id = 'map'
     path.header.stamp = rospy.Time.now()
 
-    # arr = np.array(waypoint)
-    # print(arr)
+    try:
+      if custom_weight_function:
+          waypoint = nx.dijkstra_path(self.graph,"start","goal",custom_weight_func)
+      else:
+          waypoint = nx.dijkstra_path(self.graph,"start","goal",weight_func)
+      
 
-    # print(self.graph.nodes['goal'])
-    for item in waypoint:
+      for item in waypoint:
         pose_stamped = PoseStamped()
+        pose_stamped.header.frame_id = 'map'
         data = self.graph.nodes[item]
         # print(data)
         pose_stamped.pose.position.x = data['pos'][0]
@@ -203,10 +208,11 @@ class PRMHALTONPLANNER():
         pose_stamped.pose.orientation.w = 1.0
 
         path.poses.append(pose_stamped)
+    except nx.NetworkXNoPath as err:
+      print(err)
 
-    # self.graph.remove_node('start')
-    # self.graph.remove_node('goal')
-
+    self.graph.remove_node('start')
+    self.graph.remove_node('goal')
 
     return path
 

@@ -1,0 +1,23 @@
+<launch>
+  <!-- <node name="gng_experiment2" pkg="master_project" type="path_query.py" output="screen" ns="gng" > 
+    <param name="planner_name" value="/gng/path_planner" /> 
+    <param name="file_name" value="/home/ridhwan/experiment2/experiment2_gng.csv"/> 
+  </node> -->
+
+
+  <node name="gng_biased_experiment2" pkg="master_project" type="path_query.py" output="screen" ns="gng_biased" > 
+    <param name="planner_name" value="/gng_biased/path_planner" /> 
+    <param name="file_name" value="/home/ridhwan/experiment2/experiment2_gng_biased.csv"/> 
+  </node>
+
+  <!-- <node name="prm_experiment2" pkg="master_project" type="path_query.py" output="screen" ns="prm" > 
+    <param name="planner_name" value="/prm/path_planner" /> 
+    <param name="file_name" value="/home/ridhwan/experiment2/experiment2_prm.csv" /> 
+  </node> -->
+
+
+  <!-- <node name="prm_halton_experiment2" pkg="master_project" type="path_query.py" output="screen" ns="prm_halton" > 
+    <param name="planner_name" value="/prm_halton/path_planner"  /> 
+    <param name="file_name" value="/home/ridhwan/experiment2/experiment2_prm_halton.csv" /> 
+  </node> -->
+</launch>

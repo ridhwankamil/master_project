@@ -1,0 +1,9 @@
+<launch>
+  <node 
+    name="gng_biased_experiment2_save_path" 
+    pkg="master_project" 
+    type="experiment3_save_path.py" 
+    output="screen" 
+    ns="gng_biased" > 
+  </node>
+</launch>

@@ -346,7 +346,7 @@ class GNGPLANNER():
                 #add to graph
                 self.graph.add_edge("start",item)
 
-        dists, indexes = self.nodes_kd_tree.query(goal,k=10,distance_upper_bound=1.0)
+        dists, indexes = self.nodes_kd_tree.query(goal,k=3,distance_upper_bound=1.0)
         for item in indexes:
             # check collision
             if item >= len(self.nodes_arr):

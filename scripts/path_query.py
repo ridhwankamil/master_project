@@ -20,6 +20,8 @@ from master_project.srv import RequestPath,RequestPathRequest,RequestPathRespons
 from pprint import pprint
 
 
+
+
 class EXPERIMENT1():
   def __init__(self):
     self.obstacle_kd_tree:KDTree # kd-tree for obstacle array
@@ -44,6 +46,7 @@ class EXPERIMENT1():
     print("done init experiment path success rate")
 
   def map_callback(self,map_msg):
+    print("receive map")
     #every time receive map reinitializa
     self.done_map_callback = False
     # 1. Initialize original map every time new map receive
@@ -116,6 +119,7 @@ class EXPERIMENT1():
 
   def generate_obs_marker(self) -> Marker:
     """Return obstacle marker"""
+    print("generating obstacle marker")
     # 1. initialize node marker
     node_marker = Marker()
     node_marker.type = 8
@@ -188,18 +192,26 @@ if __name__ == '__main__':
   rospy.init_node('experiment_2')
   node = EXPERIMENT1()
   rate = rospy.Rate(0.5)
+  planner_service_name = rospy.get_param('~planner_name','/gng_biased/path_planner') # number of nodes to be sampled
+  file_name = rospy.get_param('~file_name',"/home/ridhwan/experiment2_gng.csv")
 
-  p = [
-    [-5.4969, -3.3565],
-    [6.6549, -4.5701],
-    [6.521, 3.9988],
-    [0.8364, 1.7727],
-    [-2.649, 4.4471],
-    [-6.3008, 3.9737]
+  g = [
+    [10.70000171661377, 12.100001335144043],
+    [-9.15000057220459, 5.400001049041748],
+    [-11.95000171661377, -8.100001335144043],
+    [26.10000228881836, -6.250000953674316],
+    [25.650005340576172, 4.450000762939453]
+  ]
+  s = [
+    [25.650005340576172, 4.450000762939453],
+    [-22.750003814697266, 10.65000057220459],
+    [10.950000762939453, -10.350001335144043],
+    [20.500003814697266, -19.10000228881836],
+    [-9.15000057220459, 5.400001049041748]
   ]
   
 
-  pprint(p)
+  pprint(s)
 
   while not node.done_map_callback:
     print("waiting")
@@ -207,109 +219,59 @@ if __name__ == '__main__':
   
  
   try:
-    rospy.wait_for_service('/gng_biased/path_planner',timeout=5.0)
+    rospy.wait_for_service(planner_service_name,timeout=5.0)
     print("service available")
-    for outer_item in p:
-      for inner_item in p:
-        service = rospy.ServiceProxy('/gng_biased/path_planner', RequestPath)
-        if outer_item == inner_item:
-          pass
-        else:
-          print("start: ", outer_item, " , ", "goal: ", inner_item)
+    for i in range(5):
+      start = s[i]
+      goal = g[i]
+
+      service = rospy.ServiceProxy(planner_service_name, RequestPath)
+      print("start: ", start, " , ", "goal: ", goal)
+    
+      req = RequestPathRequest()
+      req.start.pose.position.x = start[0]
+      req.start.pose.position.y = start[1]
+
+      req.goal.pose.position.x = goal[0]
+      req.goal.pose.position.y = goal[1]
+      req.custom_weight_function = False
+      res:RequestPathResponse = service(req)
+
+
+      success = res.state
+
+      dist_to_obs = []
+      min_val = 0
+      max_val = 0
+      avg_value = 0
+      if success:
+        for item in res.path.poses:
+          p_x = item.pose.position.x
+          p_y = item.pose.position.y
+          dists,indexes = node.obstacle_kd_tree.query([p_x,p_y],k=1,distance_upper_bound=100)
+          # print(dists)
+          dist_to_obs.append(dists)
+
+        dist_to_obs.sort() #sort list ascending
+        min_val = dist_to_obs[0]
+        max_val = dist_to_obs[-1]
+        avg_value = sum(dist_to_obs)/len(dist_to_obs)
+      prev = []
+      with open(file_name) as f:
+        prev = f.readlines()
+      with open(file_name,"w") as f:
+        prev.append(str(start[0])+","+str(start[1])+","+str(goal[0])+","+str(goal[1])+","+str(success)+","+str(min_val)+","+str(max_val)+","+str(avg_value)+"\n")
+        f.writelines(prev)
         
-          req = RequestPathRequest()
-          req.start.pose.position.x = outer_item[0]
-          req.start.pose.position.y = outer_item[1]
+      print(str(success)+","+str(min_val)+","+str(max_val)+","+str(avg_value))
 
-          req.goal.pose.position.x = inner_item[0]
-          req.goal.pose.position.y = inner_item[1]
-          req.custom_weight_function = False
-          res:RequestPathResponse = service(req)
-
-
-          success = res.state
-
-          dist_to_obs = []
-          min_val = 0
-          max_val = 0
-          avg_value = 0
-          if success:
-            for item in res.path.poses:
-              p_x = item.pose.position.x
-              p_y = item.pose.position.y
-              dists,indexes = node.obstacle_kd_tree.query([p_x,p_y],k=1,distance_upper_bound=100)
-              # print(dists)
-              dist_to_obs.append(dists)
-
-            dist_to_obs.sort() #sort list ascending
-            min_val = dist_to_obs[0]
-            max_val = dist_to_obs[-1]
-            avg_value = sum(dist_to_obs)/len(dist_to_obs)
-          prev = []
-          with open("/home/ridhwan/experiment2_gng.csv") as f:
-            prev = f.readlines()
-          with open("/home/ridhwan/experiment2_gng.csv","w") as f:
-            prev.append(str(success)+","+str(min_val)+","+str(max_val)+","+str(avg_value)+"\n")
-            f.writelines(prev)
-            
-          print(str(success)+","+str(min_val)+","+str(max_val)+","+str(avg_value))
-
-          # rospy.sleep(5)
+      rospy.sleep(10)
   except rospy.ROSException as err:
     print(err)
 
-
-  try:
-    rospy.wait_for_service('/gng_biased/path_planner',timeout=5.0)
-    print("service available")
-    for outer_item in p:
-      for inner_item in p:
-        service = rospy.ServiceProxy('/gng_biased/path_planner', RequestPath)
-        if outer_item == inner_item:
-          pass
-        else:
-          print("start: ", outer_item, " , ", "goal: ", inner_item)
-        
-          req = RequestPathRequest()
-          req.start.pose.position.x = outer_item[0]
-          req.start.pose.position.y = outer_item[1]
-
-          req.goal.pose.position.x = inner_item[0]
-          req.goal.pose.position.y = inner_item[1]
-          req.custom_weight_function = True
-          res:RequestPathResponse = service(req)
+  # rospy.spin()
 
 
-          success = res.state
-
-          dist_to_obs = []
-          min_val = 0
-          max_val = 0
-          avg_value = 0
-          if success:
-            for item in res.path.poses:
-              p_x = item.pose.position.x
-              p_y = item.pose.position.y
-              dists,indexes = node.obstacle_kd_tree.query([p_x,p_y],k=1,distance_upper_bound=100)
-              # print(dists)
-              dist_to_obs.append(dists)
-
-            dist_to_obs.sort() #sort list ascending
-            min_val = dist_to_obs[0]
-            max_val = dist_to_obs[-1]
-            avg_value = sum(dist_to_obs)/len(dist_to_obs)
-          prev = []
-          with open("/home/ridhwan/experiment2_gng.csv") as f:
-            prev = f.readlines()
-          with open("/home/ridhwan/experiment2_gng.csv","w") as f:
-            prev.append(str(success)+","+str(min_val)+","+str(max_val)+","+str(avg_value)+"\n")
-            f.writelines(prev)
-            
-          print(str(success)+","+str(min_val)+","+str(max_val)+","+str(avg_value))
-
-          # rospy.sleep(5)
-  except rospy.ROSException as err:
-    print(err)
  
 
     
